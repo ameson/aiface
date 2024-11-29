@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI颜值评分</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .drop-zone {
+            border: 2px dashed #ccc;
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            border-color: #4CAF50;
+            background-color: rgba(76, 175, 80, 0.1);
+        }
+        .score-card {
+            transition: all 0.3s ease;
+        }
+        .score-card:hover {
+            transform: translateY(-5px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">AI颜值评分</h1>
+            <p class="text-gray-600">上传照片，立即获取AI颜值评分</p>
+        </div>
+
+        <div class="max-w-xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <div id="dropZone" class="drop-zone rounded-lg p-8 text-center cursor-pointer mb-4">
+                <div id="preview" class="mb-4 hidden">
+                    <img id="previewImage" src="" alt="预览" class="max-w-full h-auto mx-auto rounded-lg">
+                </div>
+                <div id="uploadText">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <p class="mt-1 text-sm text-gray-600">点击或拖放图片到这里上传</p>
+                </div>
+                <input type="file" id="fileInput" class="hidden" accept="image/*">
+            </div>
+
+            <div id="loading" class="hidden">
+                <div class="flex items-center justify-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                    <span class="ml-2">分析中...</span>
+                </div>
+            </div>
+
+            <div id="results" class="hidden space-y-4">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">分析结果</h2>
+                <div id="resultCards" class="grid gap-4"></div>
+            </div>
+
+            <div id="error" class="hidden">
+                <p class="text-red-500 text-center"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const previewImage = document.getElementById('previewImage');
+        const uploadText = document.getElementById('uploadText');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const resultCards = document.getElementById('resultCards');
+        const error = document.getElementById('error');
+
+        // 拖放处理
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        // 点击上传
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type.startsWith('image/')) {
+                    uploadFile(file);
+                    showPreview(file);
+                } else {
+                    showError('请上传图片文件');
+                }
+            }
+        }
+
+        function showPreview(file) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                previewImage.src = e.target.result;
+                preview.classList.remove('hidden');
+                uploadText.classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            showLoading();
+            hideError();
+            hideResults();
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                hideLoading();
+                
+                if (data.error) {
+                    showError(data.error);
+                } else if (!data.results || data.results.length === 0) {
+                    showError('无法分析图片，请尝试其他照片');
+                } else {
+                    showResults(data.results);
+                }
+            } catch (err) {
+                hideLoading();
+                showError(`上传失败: ${err.message}`);
+                console.error('Upload error:', err);
+            }
+        }
+
+        function showResults(results) {
+            const resultsContainer = document.getElementById('results');
+            const resultCards = document.getElementById('resultCards');
+            
+            if (!resultsContainer || !resultCards) {
+                console.error('Results container elements not found');
+                return;
+            }
+
+            // 清空现有结果
+            resultCards.innerHTML = '';
+
+            // 添加新的结果卡片
+            results.forEach((result, index) => {
+                const card = document.createElement('div');
+                card.className = 'score-card bg-white p-6 rounded-lg shadow-sm border border-gray-200';
+                
+                // 创建总分部分
+                const scoreHeader = `
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-xl font-semibold text-gray-700">总分</span>
+                        <span class="text-3xl font-bold text-blue-600">${result.score}</span>
+                    </div>
+                    <div class="h-px bg-gray-200 my-4"></div>
+                `;
+
+                // 创建维度评分部分
+                let dimensionsHtml = '<div class="space-y-4">';
+                
+                // 先添加正面评分项
+                if (result.dimensions) {
+                    dimensionsHtml += '<div class="space-y-3">';
+                    Object.values(result.dimensions).forEach(dim => {
+                        if (!dim.is_penalty) {
+                            const percentage = dim.score;
+                            dimensionsHtml += `
+                                <div class="space-y-1">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-sm font-medium text-gray-600">
+                                            ${dim.name}
+                                            <span class="text-xs text-gray-400">(权重: ${dim.weight}%)</span>
+                                        </span>
+                                        <span class="text-sm font-semibold text-gray-700">${dim.score}</span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 rounded-full h-2">
+                                        <div class="bg-blue-600 h-2 rounded-full" style="width: ${percentage}%"></div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+                    dimensionsHtml += '</div>';
+
+                    // 添加惩罚项（如果有）
+                    const penalties = Object.values(result.dimensions).filter(dim => dim.is_penalty);
+                    if (penalties.length > 0) {
+                        dimensionsHtml += `
+                            <div class="mt-6">
+                                <h3 class="text-lg font-semibold text-red-600 mb-3">扣分项</h3>
+                                <div class="space-y-3">
+                        `;
+                        penalties.forEach(penalty => {
+                            dimensionsHtml += `
+                                <div class="bg-red-50 p-3 rounded-lg">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-sm font-medium text-red-700">${penalty.name}</span>
+                                        <span class="text-sm font-bold text-red-600">${penalty.score}</span>
+                                    </div>
+                                    <p class="text-xs text-red-600 mt-1">${penalty.description}</p>
+                                </div>
+                            `;
+                        });
+                        dimensionsHtml += '</div></div>';
+                    }
+                }
+                dimensionsHtml += '</div>';
+
+                // 组合所有内容
+                card.innerHTML = scoreHeader + dimensionsHtml;
+                
+                resultCards.appendChild(card);
+            });
+
+            // 显示结果容器
+            resultsContainer.classList.remove('hidden');
+        }
+
+        function hideResults() {
+            const resultsContainer = document.getElementById('results');
+            if (resultsContainer) {
+                resultsContainer.classList.add('hidden');
+            }
+        }
+
+        function showError(message) {
+            const errorContainer = document.getElementById('error');
+            if (errorContainer) {
+                const errorText = errorContainer.querySelector('p');
+                if (errorText) {
+                    errorText.textContent = message;
+                }
+                errorContainer.classList.remove('hidden');
+            }
+        }
+
+        function hideError() {
+            const errorContainer = document.getElementById('error');
+            if (errorContainer) {
+                errorContainer.classList.add('hidden');
+            }
+        }
+
+        function showLoading() {
+            const loadingContainer = document.getElementById('loading');
+            if (loadingContainer) {
+                loadingContainer.classList.remove('hidden');
+            }
+        }
+
+        function hideLoading() {
+            const loadingContainer = document.getElementById('loading');
+            if (loadingContainer) {
+                loadingContainer.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
